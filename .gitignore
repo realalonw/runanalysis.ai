@@ -1,14 +1,23 @@
 # Dependencies
 node_modules/
+jspm_packages/
+web_modules/
 
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Uploads directory
 /uploads
 
 # Logs
+logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 
 # OS generated files
 .DS_Store
@@ -26,6 +35,62 @@ node_modules/
 *.sln
 *.sw?
 
-# Build directory
+# Build directories
 /build
 /dist
+/out
+.next
+.nuxt
+.cache
+.parcel-cache
+.svelte-kit/
+.docusaurus
+
+# Coverage and testing
+coverage
+*.lcov
+.nyc_output
+lib-cov
+
+# Package manager files
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.yarn-integrity
+.pnp.*
+.npm
+
+# Cache directories
+.temp
+.fusebox/
+.serverless/
+.dynamodb/
+.firebase/
+.vscode-test/
+
+# Framework specific
+.vuepress/dist
+**/.vitepress/dist
+**/.vitepress/cache
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# TypeScript
+*.tsbuildinfo
+
+# Misc
+*.tgz
+.tern-port
+.lock-wscript
+build/Release
+bower_components/
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
