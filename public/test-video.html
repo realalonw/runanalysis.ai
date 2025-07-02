@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Frame Extraction Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #previewContainer {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        #frameStrip {
+            display: flex;
+            overflow-x: auto;
+            gap: 8px;
+            padding: 8px 0;
+        }
+        .frame-thumbnail {
+            width: 120px;
+            height: 80px;
+            background-size: cover;
+            background-position: center;
+            border: 2px solid transparent;
+            cursor: pointer;
+        }
+        .frame-thumbnail.selected {
+            border-color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-2xl font-bold mb-6">Video Frame Extraction Test</h1>
+        
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Upload a video file</label>
+                <input type="file" id="videoInput" accept="video/*" class="block w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-md file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-blue-50 file:text-blue-700
+                    hover:file:bg-blue-100">
+            </div>
+            
+            <div id="progressContainer" class="hidden mb-4 p-4 bg-blue-50 rounded-md">
+                <div class="flex items-center">
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <span id="progressText" class="ml-3 text-sm text-gray-600">0%</span>
+                </div>
+                <p id="statusText" class="text-sm text-gray-600 mt-1">Preparing to extract frames...</p>
+            </div>
+        </div>
+
+        <div id="previewSection" class="hidden">
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h2 class="text-lg font-semibold mb-4">Video Preview</h2>
+                <div id="videoContainer" class="mb-4">
+                    <!-- Video will be inserted here -->
+                </div>
+                
+                <div class="bg-gray-50 p-4 rounded-md mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="text-sm text-gray-600">
+                            Frame: <span id="currentFrame">-</span> / <span id="totalFrames">-</span>
+                            <span class="mx-2">•</span>
+                            Time: <span id="frameTime">00:00:00</span>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="prevFrame" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">
+                                Previous
+                            </button>
+                            <button id="nextFrame" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm">
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                    <div class="relative h-24 bg-gray-100 rounded overflow-hidden">
+                        <div id="frameStrip" class="absolute top-0 left-0 h-full flex space-x-2 p-2 overflow-x-auto">
+                            <!-- Frame thumbnails will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-4">
+                    <button id="analyzeBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50" disabled>
+                        Analyze Selected Frame
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/video-utils-new.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Initialize variables
+            let extractedFrames = [];
+            let currentFrameIndex = 0;
+            let frameExtractor = null;
+            
+            // DOM elements
+            const videoInput = document.getElementById('videoInput');
+            const previewSection = document.getElementById('previewSection');
+            const videoContainer = document.getElementById('videoContainer');
+            const frameStrip = document.getElementById('frameStrip');
+            const currentFrameEl = document.getElementById('currentFrame');
+            const totalFramesEl = document.getElementById('totalFrames');
+            const frameTimeEl = document.getElementById('frameTime');
+            const prevFrameBtn = document.getElementById('prevFrame');
+            const nextFrameBtn = document.getElementById('nextFrame');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const statusText = document.getElementById('statusText');
+
+            // Format time as HH:MM:SS
+            function formatTime(seconds) {
+                const h = Math.floor(seconds / 3600);
+                const m = Math.floor((seconds % 3600) / 60);
+                const s = Math.floor(seconds % 60);
+                return [
+                    h.toString().padStart(2, '0'),
+                    m.toString().padStart(2, '0'),
+                    s.toString().padStart(2, '0')
+                ].join(':');
+            }
+
+
+            // Handle file selection
+            videoInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                try {
+                    // Show progress container
+                    progressContainer.classList.remove('hidden');
+                    statusText.textContent = 'Loading video...';
+                    
+                    // Create video element
+                    const video = document.createElement('video');
+                    video.controls = true;
+                    video.muted = true;
+                    video.preload = 'metadata';
+                    
+                    // Set up video source
+                    const videoUrl = URL.createObjectURL(file);
+                    video.src = videoUrl;
+                    
+                    // Wait for video metadata to load
+                    await new Promise((resolve, reject) => {
+                        video.onloadedmetadata = () => {
+                            video.currentTime = 0;
+                            resolve();
+                        };
+                        video.onerror = () => reject(new Error('Failed to load video'));
+                    });
+                    
+                    // Show video preview
+                    videoContainer.innerHTML = '';
+                    videoContainer.appendChild(video);
+                    
+                    // Initialize frame extractor
+                    frameExtractor = new VideoFrameExtractor();
+                    
+                    // Set up progress callback
+                    frameExtractor.onProgress = ({ current, total }) => {
+                        const percent = Math.round((current / total) * 100);
+                        progressBar.style.width = `${percent}%`;
+                        progressText.textContent = `${percent}%`;
+                        statusText.textContent = `Extracting frames... ${current} of ${total}`;
+                    };
+                    
+                    // Set up completion callback
+                    frameExtractor.onComplete = (frames) => {
+                        extractedFrames = frames;
+                        updateFrameStrip();
+                        selectFrame(0);
+                        previewSection.classList.remove('hidden');
+                        analyzeBtn.disabled = false;
+                        statusText.textContent = `Extracted ${frames.length} frames`;
+                    };
+                    
+                    // Set up error callback
+                    frameExtractor.onError = (error) => {
+                        console.error('Frame extraction error:', error);
+                        statusText.textContent = `Error: ${error.message}`;
+                        statusText.classList.add('text-red-600');
+                    };
+                    
+                    // Start frame extraction
+                    statusText.textContent = 'Starting frame extraction...';
+                    await frameExtractor.extractFrames(file);
+                    
+                } catch (error) {
+                    console.error('Error processing video:', error);
+                    statusText.textContent = `Error: ${error.message}`;
+                    statusText.classList.add('text-red-600');
+                }
+            });
+            
+            // Update frame strip with thumbnails
+            function updateFrameStrip() {
+                frameStrip.innerHTML = '';
+                
+                extractedFrames.forEach((frame, index) => {
+                    const thumb = document.createElement('div');
+                    thumb.className = 'frame-thumbnail';
+                    thumb.style.backgroundImage = `url(${frame.url})`;
+                    thumb.dataset.index = index;
+                    thumb.title = `Frame ${index + 1} (${formatTime(frame.time)})`;
+                    thumb.addEventListener('click', () => selectFrame(index));
+                    frameStrip.appendChild(thumb);
+                });
+                
+                totalFramesEl.textContent = extractedFrames.length;
+            }
+            
+            // Select a specific frame
+            function selectFrame(index) {
+                if (index < 0 || index >= extractedFrames.length) return;
+                
+                currentFrameIndex = index;
+                const frame = extractedFrames[index];
+                
+                // Update UI
+                currentFrameEl.textContent = index + 1;
+                frameTimeEl.textContent = formatTime(frame.time);
+                
+                // Update selected state
+                document.querySelectorAll('.frame-thumbnail').forEach((thumb, i) => {
+                    thumb.classList.toggle('selected', i === index);
+                });
+                
+                // Scroll to selected frame
+                const selectedThumb = document.querySelector(`.frame-thumbnail[data-index="${index}"]`);
+                if (selectedThumb) {
+                    selectedThumb.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'nearest',
+                        inline: 'center'
+                    });
+                }
+            }
+            
+            // Navigation handlers
+            prevFrameBtn.addEventListener('click', () => {
+                if (currentFrameIndex > 0) {
+                    selectFrame(currentFrameIndex - 1);
+                }
+            });
+            
+            nextFrameBtn.addEventListener('click', () => {
+                if (currentFrameIndex < extractedFrames.length - 1) {
+                    selectFrame(currentFrameIndex + 1);
+                }
+            });
+            
+            // Analyze button handler
+            analyzeBtn.addEventListener('click', () => {
+                if (extractedFrames.length === 0 || currentFrameIndex === -1) {
+                    alert('Please select a frame to analyze');
+                    return;
+                }
+                
+                const frame = extractedFrames[currentFrameIndex];
+                console.log('Selected frame for analysis:', {
+                    index: currentFrameIndex,
+                    time: frame.time,
+                    url: frame.url
+                });
+                
+                // Here you would typically send the frame to your analysis API
+                alert(`Analyzing frame ${currentFrameIndex + 1} at ${formatTime(frame.time)}`);
+            });
+        });
+    </script>
+</body>
+</html>

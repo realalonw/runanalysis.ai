@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Frame Extraction Test</title>
+    <link href="/css/tailwind.css" rel="stylesheet">
+    <style>
+        #previewContainer {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        #frameStrip {
+            display: flex;
+            overflow-x: auto;
+            gap: 8px;
+            padding: 8px 0;
+            min-height: 100px;
+        }
+        .frame-thumbnail {
+            width: 120px;
+            height: 80px;
+            background-size: cover;
+            background-position: center;
+            border: 2px solid transparent;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .frame-thumbnail.selected {
+            border-color: #3b82f6;
+        }
+        #videoContainer {
+            background-color: #000;
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+        #videoContainer video {
+            width: 100%;
+            max-height: 400px;
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-2xl font-bold mb-6">Video Frame Extraction Test</h1>
+        
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Upload a video file (MP4, WebM, or MOV)</label>
+                <input type="file" id="videoInput" accept="video/mp4,video/webm,video/quicktime" class="block w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-md file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-blue-50 file:text-blue-700
+                    hover:file:bg-blue-100">
+            </div>
+            
+            <div id="progressContainer" class="hidden mb-4 p-4 bg-blue-50 rounded-md">
+                <div class="flex items-center">
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <span id="progressText" class="ml-3 text-sm text-gray-600">0%</span>
+                </div>
+                <p id="statusText" class="text-sm text-gray-600 mt-1">Preparing to extract frames...</p>
+                <pre id="errorLog" class="hidden mt-2 p-2 bg-red-50 text-red-700 text-xs rounded overflow-auto max-h-32"></pre>
+            </div>
+        </div>
+
+        <div id="previewSection" class="hidden">
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h2 class="text-lg font-semibold mb-4">Video Preview</h2>
+                <div id="videoContainer" class="mb-4">
+                    <!-- Video will be inserted here -->
+                </div>
+                
+                <div class="bg-gray-50 p-4 rounded-md mb-4">
+                    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-2 gap-2">
+                        <div class="text-sm text-gray-600">
+                            Frame: <span id="currentFrame">-</span> / <span id="totalFrames">-</span>
+                            <span class="mx-2">•</span>
+                            Time: <span id="frameTime">00:00:00</span>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button id="prevFrame" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm disabled:opacity-50" disabled>
+                                Previous
+                            </button>
+                            <button id="nextFrame" class="px-3 py-1 bg-gray-200 rounded hover:bg-gray-300 text-sm disabled:opacity-50" disabled>
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                    <div class="relative h-24 bg-gray-100 rounded overflow-hidden">
+                        <div id="frameStrip" class="absolute top-0 left-0 h-full flex space-x-2 p-2 overflow-x-auto">
+                            <!-- Frame thumbnails will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-4">
+                    <button id="analyzeBtn" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50" disabled>
+                        Analyze Selected Frame
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/video-utils-new.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize variables
+            let extractedFrames = [];
+            let currentFrameIndex = -1;
+            let frameExtractor = null;
+            
+            // DOM elements
+            const videoInput = document.getElementById('videoInput');
+            const previewSection = document.getElementById('previewSection');
+            const videoContainer = document.getElementById('videoContainer');
+            const frameStrip = document.getElementById('frameStrip');
+            const currentFrameEl = document.getElementById('currentFrame');
+            const totalFramesEl = document.getElementById('totalFrames');
+            const frameTimeEl = document.getElementById('frameTime');
+            const prevFrameBtn = document.getElementById('prevFrame');
+            const nextFrameBtn = document.getElementById('nextFrame');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const statusText = document.getElementById('statusText');
+            const errorLog = document.getElementById('errorLog');
+
+            // Log errors to UI
+            function logError(error) {
+                console.error(error);
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                errorLog.textContent += `[${new Date().toISOString()}] ${errorMessage}\n`;
+                errorLog.scrollTop = errorLog.scrollHeight;
+                errorLog.classList.remove('hidden');
+                statusText.textContent = `Error: ${errorMessage}`;
+                statusText.className = 'text-sm text-red-600 mt-1';
+            }
+
+            // Format time as HH:MM:SS
+            function formatTime(seconds) {
+                const h = Math.floor(seconds / 3600);
+                const m = Math.floor((seconds % 3600) / 60);
+                const s = Math.floor(seconds % 60);
+                return [
+                    h.toString().padStart(2, '0'),
+                    m.toString().padStart(2, '0'),
+                    s.toString().padStart(2, '0')
+                ].join(':');
+            }
+
+            // Reset UI state
+            function resetUI() {
+                extractedFrames = [];
+                currentFrameIndex = -1;
+                frameStrip.innerHTML = '';
+                currentFrameEl.textContent = '-';
+                totalFramesEl.textContent = '-';
+                frameTimeEl.textContent = '00:00:00';
+                previewSection.classList.add('hidden');
+                progressBar.style.width = '0%';
+                progressText.textContent = '0%';
+                errorLog.textContent = '';
+                errorLog.classList.add('hidden');
+                prevFrameBtn.disabled = true;
+                nextFrameBtn.disabled = true;
+                analyzeBtn.disabled = true;
+                
+                if (frameExtractor) {
+                    frameExtractor.cleanup();
+                    frameExtractor = null;
+                }
+            }
+
+            // Handle file selection
+            videoInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                try {
+                    // Reset UI state
+                    resetUI();
+                    
+                    // Show progress container
+                    progressContainer.classList.remove('hidden');
+                    statusText.textContent = 'Loading video...';
+                    statusText.className = 'text-sm text-gray-600 mt-1';
+                    
+                    // Create video element
+                    const video = document.createElement('video');
+                    video.controls = true;
+                    video.muted = true;
+                    video.preload = 'metadata';
+                    video.playsInline = true;
+                    
+                    // Set up video source
+                    const videoUrl = URL.createObjectURL(file);
+                    video.src = videoUrl;
+                    
+                    // Wait for video metadata to load
+                    await new Promise((resolve, reject) => {
+                        const timeout = setTimeout(() => {
+                            reject(new Error('Video loading timed out. The file may be corrupted or in an unsupported format.'));
+                        }, 10000); // 10 second timeout
+                        
+                        video.onloadedmetadata = () => {
+                            clearTimeout(timeout);
+                            video.currentTime = 0;
+                            resolve();
+                        };
+                        
+                        video.onerror = () => {
+                            clearTimeout(timeout);
+                            reject(new Error('Failed to load video. The file may be corrupted or in an unsupported format.'));
+                        };
+                    });
+                    
+                    // Show video preview
+                    videoContainer.innerHTML = '';
+                    videoContainer.appendChild(video);
+                    
+                    // Initialize frame extractor
+                    frameExtractor = new VideoFrameExtractor({
+                        maxFrames: 30, // Limit to 30 frames for testing
+                        frameRate: 1, // 1 frame per second
+                        maxDuration: 30 // Max 30 seconds
+                    });
+                    
+                    // Set up progress callback
+                    frameExtractor.onProgress = ({ current, total }) => {
+                        const percent = Math.round((current / total) * 100);
+                        progressBar.style.width = `${percent}%`;
+                        progressText.textContent = `${percent}%`;
+                        statusText.textContent = `Extracting frames... ${current} of ${total}`;
+                    };
+                    
+                    // Set up completion callback
+                    frameExtractor.onComplete = (frames) => {
+                        console.log('Frames extracted:', frames);
+                        extractedFrames = frames;
+                        updateFrameStrip();
+                        selectFrame(0);
+                        previewSection.classList.remove('hidden');
+                        analyzeBtn.disabled = false;
+                        statusText.textContent = `Successfully extracted ${frames.length} frames`;
+                        statusText.className = 'text-sm text-green-600 mt-1';
+                        
+                        // Enable navigation buttons if there are multiple frames
+                        if (frames.length > 1) {
+                            prevFrameBtn.disabled = false;
+                            nextFrameBtn.disabled = false;
+                        }
+                    };
+                    
+                    // Set up error callback
+                    frameExtractor.onError = (error) => {
+                        logError(error);
+                    };
+                    
+                    // Start frame extraction
+                    statusText.textContent = 'Starting frame extraction...';
+                    await frameExtractor.extractFrames(file);
+                    
+                } catch (error) {
+                    logError(error);
+                    // Reset file input to allow retrying
+                    videoInput.value = '';
+                }
+            });
+            
+            // Update frame strip with thumbnails
+            function updateFrameStrip() {
+                frameStrip.innerHTML = '';
+                
+                if (!extractedFrames.length) return;
+                
+                extractedFrames.forEach((frame, index) => {
+                    const thumb = document.createElement('div');
+                    thumb.className = 'frame-thumbnail';
+                    thumb.style.backgroundImage = `url(${frame.url})`;
+                    thumb.dataset.index = index;
+                    thumb.title = `Frame ${index + 1} (${formatTime(frame.time)})`;
+                    thumb.addEventListener('click', () => selectFrame(index));
+                    frameStrip.appendChild(thumb);
+                });
+                
+                totalFramesEl.textContent = extractedFrames.length;
+            }
+            
+            // Select a specific frame
+            function selectFrame(index) {
+                if (index < 0 || index >= extractedFrames.length) return;
+                
+                currentFrameIndex = index;
+                const frame = extractedFrames[index];
+                
+                // Update UI
+                currentFrameEl.textContent = index + 1;
+                frameTimeEl.textContent = formatTime(frame.time);
+                
+                // Update selected state
+                document.querySelectorAll('.frame-thumbnail').forEach((thumb, i) => {
+                    thumb.classList.toggle('selected', i === index);
+                });
+                
+                // Scroll to selected frame
+                const selectedThumb = document.querySelector(`.frame-thumbnail[data-index="${index}"]`);
+                if (selectedThumb) {
+                    selectedThumb.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'nearest',
+                        inline: 'center'
+                    });
+                }
+                
+                // Update navigation buttons
+                prevFrameBtn.disabled = index <= 0;
+                nextFrameBtn.disabled = index >= extractedFrames.length - 1;
+            }
+            
+            // Navigation handlers
+            prevFrameBtn.addEventListener('click', () => {
+                if (currentFrameIndex > 0) {
+                    selectFrame(currentFrameIndex - 1);
+                }
+            });
+            
+            nextFrameBtn.addEventListener('click', () => {
+                if (currentFrameIndex < extractedFrames.length - 1) {
+                    selectFrame(currentFrameIndex + 1);
+                }
+            });
+            
+            // Analyze button handler
+            analyzeBtn.addEventListener('click', () => {
+                if (extractedFrames.length === 0 || currentFrameIndex === -1) {
+                    alert('Please select a frame to analyze');
+                    return;
+                }
+                
+                const frame = extractedFrames[currentFrameIndex];
+                console.log('Selected frame for analysis:', {
+                    index: currentFrameIndex,
+                    time: frame.time,
+                    url: frame.url
+                });
+                
+                // Here you would typically send the frame to your analysis API
+                alert(`Analyzing frame ${currentFrameIndex + 1} at ${formatTime(frame.time)}`);
+            });
+            
+            // Initialize UI
+            resetUI();
+        });
+    </script>
+</body>
+</html>
