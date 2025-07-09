@@ -1,6 +1,7 @@
 # RunAnalysis.AI
 
 An AI-powered platform for analyzing videos, images, and documents with OpenAI's GPT and Vision APIs.
+Notes: this was created before Gemini dropped their latest video analysis update. The main trickiness in making this project was extracting frames and sending them for analysis, but now, it's basically 'worthless' (it works, it provides you with detailed and accurate analysis, but it's not any new technology). Enjoy!
 
 ## Features
 
